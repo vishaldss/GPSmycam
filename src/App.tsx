@@ -17,6 +17,7 @@ import {
 } from './utils/storage';
 import { reverseGeocode, PRESET_LOCATIONS } from './utils/geoUtils';
 import { User } from 'firebase/auth';
+import { testFirestoreConnection } from './firebase';
 import {
   initAuth,
   getAccessToken,
@@ -46,8 +47,10 @@ export default function App() {
   const [isLocationPresetsOpen, setIsLocationPresetsOpen] = useState(false);
   const [isCodeViewerOpen, setIsCodeViewerOpen] = useState(false);
 
-  // Initialize Firebase Auth listener
+  // Initialize Firebase Auth listener & test connection
   useEffect(() => {
+    testFirestoreConnection();
+
     const unsubscribe = initAuth(
       (user, token) => {
         setCurrentUser(user);

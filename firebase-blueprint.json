@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with sync settings and stats",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 512 },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "email"]
+    },
+    "PhotoRecord": {
+      "title": "PhotoRecord",
+      "description": "Metadata for captured GPS stamped photos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "filename": { "type": "string", "maxLength": 256 },
+        "timestamp": { "type": "number" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "altitude": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "address": { "type": "string", "maxLength": 512 },
+        "driveFileId": { "type": "string", "maxLength": 256 },
+        "driveViewUrl": { "type": "string", "maxLength": 512 },
+        "customNote": { "type": "string", "maxLength": 256 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "filename", "timestamp", "latitude", "longitude"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User custom watermark and camera preferences",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "appTheme": { "type": "string", "maxLength": 32 },
+        "mobileCameraFolder": { "type": "string", "maxLength": 256 },
+        "filenamePrefix": { "type": "string", "maxLength": 64 },
+        "autoSyncGoogleDrive": { "type": "boolean" },
+        "autoSaveToDevice": { "type": "boolean" },
+        "watermarkConfig": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document"
+    },
+    "/users/{userId}/photos/{photoId}": {
+      "schema": "PhotoRecord",
+      "description": "User captured photo metadata synced to cloud"
+    },
+    "/users/{userId}/settings/config": {
+      "schema": "UserSettings",
+      "description": "User synced app and watermark configuration"
+    }
+  }
+}

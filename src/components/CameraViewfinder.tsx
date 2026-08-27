@@ -11,6 +11,7 @@ import {
   Maximize2,
   Navigation,
   Sliders,
+  Cloud,
 } from 'lucide-react';
 import { GPSLocationData, WatermarkConfig, CapturedPhoto, AppSettings } from '../types';
 import { GPSOverlayHUD } from './GPSOverlayHUD';
@@ -320,6 +321,23 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
             <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.7)] shrink-0" />
             <span className="hidden xs:inline">
               {location?.isMock ? 'Simulated GPS' : 'High Accuracy GPS'}
+            </span>
+          </button>
+
+          {/* Google Drive Status Indicator */}
+          <div className="h-4 w-px bg-white/20 hidden md:block" />
+          <button
+            onClick={onOpenSettings}
+            className={`hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-sans font-medium transition-colors ${
+              currentUser
+                ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+                : 'bg-white/5 text-zinc-400 hover:text-zinc-200 border border-white/10'
+            }`}
+            title={currentUser ? `Connected to Drive (${currentUser.email})` : 'Google Drive not connected (Tap to set up)'}
+          >
+            <Cloud className={`w-3 h-3 ${currentUser ? 'text-blue-400' : 'text-zinc-500'}`} />
+            <span className="truncate max-w-[120px]">
+              {currentUser ? 'Drive Synced' : 'Drive Off'}
             </span>
           </button>
         </div>

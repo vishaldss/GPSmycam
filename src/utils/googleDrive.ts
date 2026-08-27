@@ -1,17 +1,13 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  getAuth,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   User,
   signOut,
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
-
-// Initialize Firebase App singleton
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+import { app, auth } from '../firebase';
 
 export const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 
@@ -21,49 +17,149 @@ provider.setCustomParameters({
   prompt: 'select_account',
 });
 
+const TOKEN_STORAGE_KEY = 'gps_camera_drive_access_token_v1';
+const TOKEN_EXPIRY_KEY = 'gps_camera_drive_token_expiry_v1';
+
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
+
+// Try restoring cached token from localStorage
+try {
+  const savedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const expiry = localStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (savedToken && expiry && parseInt(expiry, 10) > Date.now()) {
+    cachedAccessToken = savedToken;
+  } else {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  }
+} catch {
+  // Ignore local storage error
+}
 
 // Cache daily folder IDs in memory: "RootFolder/YYYY-MM-DD" -> folderId
 const folderIdCache: Record<string, string> = {};
 
+export function saveCachedAccessToken(token: string, expiresInSeconds: number = 3500): void {
+  cachedAccessToken = token;
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    const expiryTime = Date.now() + expiresInSeconds * 1000;
+    localStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString());
+  } catch (err) {
+    console.warn('Failed to store access token:', err);
+  }
+}
+
+export function clearCachedAccessToken(): void {
+  cachedAccessToken = null;
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 /**
- * Initialize Auth State Listener
+ * Check if the current browser environment is mobile
+ */
+export function isMobileDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  return (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (window.matchMedia && window.matchMedia('(max-width: 768px)').matches && 'ontouchstart' in window)
+  );
+}
+
+/**
+ * Initialize Auth State Listener and check for Redirect Results (Mobile)
  */
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string | null) => void,
   onAuthFailure?: () => void
 ) => {
+  // Check for redirect result on page boot (Crucial for mobile redirect flow)
+  getRedirectResult(auth)
+    .then((result) => {
+      if (result) {
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          saveCachedAccessToken(credential.accessToken);
+          if (onAuthSuccess) {
+            onAuthSuccess(result.user, credential.accessToken);
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn('Redirect auth result warning:', err);
+    });
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        // Try getting fresh token or prompt if needed
+      } else {
         if (onAuthSuccess) onAuthSuccess(user, null);
       }
     } else {
-      cachedAccessToken = null;
+      clearCachedAccessToken();
       if (onAuthFailure) onAuthFailure();
     }
   });
 };
 
 /**
- * Sign in with Google Popup
+ * Sign in with Google (Supports both Mobile-friendly Popup and Redirect mode)
  */
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+export const googleSignIn = async (
+  forceRedirect: boolean = false
+): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const isMobile = isMobileDevice();
 
-    if (!credential?.accessToken) {
-      throw new Error('Could not retrieve Google Drive access token from authentication.');
+    // If mobile or explicitly requested redirect mode, use signInWithRedirect
+    if (forceRedirect) {
+      await signInWithRedirect(auth, provider);
+      return null;
     }
 
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+
+      if (!credential?.accessToken) {
+        throw new Error('Google Drive access scope not granted. Please approve permissions.');
+      }
+
+      saveCachedAccessToken(credential.accessToken);
+      return { user: result.user, accessToken: credential.accessToken };
+    } catch (popupError: any) {
+      console.warn('Popup sign in encountered issue:', popupError);
+
+      // If popup was blocked, closed prematurely on mobile, or user-agent blocked:
+      if (
+        popupError.code === 'auth/popup-blocked' ||
+        popupError.code === 'auth/popup-closed-by-user' ||
+        popupError.code === 'auth/cancelled-popup-request' ||
+        isMobile
+      ) {
+        console.log('Falling back to Mobile Redirect flow...');
+        await signInWithRedirect(auth, provider);
+        return null;
+      }
+
+      if (popupError.code === 'auth/unauthorized-domain') {
+        const hostname = window.location.hostname;
+        throw new Error(
+          `Domain "${hostname}" is not authorized in Firebase Console. Add "${hostname}" to Firebase Console -> Authentication -> Settings -> Authorized Domains.`
+        );
+      }
+
+      throw popupError;
+    }
   } catch (error: any) {
     console.error('Google Sign In error:', error);
     throw error;
@@ -73,7 +169,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 /**
- * Get current cached access token
+ * Get current cached access token or prompt
  */
 export const getAccessToken = async (): Promise<string | null> => {
   if (cachedAccessToken) {
@@ -83,7 +179,7 @@ export const getAccessToken = async (): Promise<string | null> => {
   // If user is already logged in, prompt popup to refresh token
   if (auth.currentUser) {
     try {
-      const res = await googleSignIn();
+      const res = await googleSignIn(false);
       return res?.accessToken || null;
     } catch {
       return null;
@@ -94,11 +190,11 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 /**
- * Logout from Firebase & clear memory tokens
+ * Logout from Firebase & clear tokens
  */
 export const googleLogout = async (): Promise<void> => {
   await signOut(auth);
-  cachedAccessToken = null;
+  clearCachedAccessToken();
   Object.keys(folderIdCache).forEach((k) => delete folderIdCache[k]);
 };
 

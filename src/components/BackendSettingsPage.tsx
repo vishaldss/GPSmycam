@@ -18,6 +18,11 @@ import {
   RefreshCw,
   Eye,
   Layers,
+  Copy,
+  Check,
+  ShieldAlert,
+  ArrowRight,
+  HelpCircle,
 } from 'lucide-react';
 import {
   AppSettings,
@@ -30,7 +35,7 @@ import {
   WatermarkPosition,
 } from '../types';
 import { User } from 'firebase/auth';
-import { googleSignIn, googleLogout, getDailyDriveFolder } from '../utils/googleDrive';
+import { googleSignIn, googleLogout, getDailyDriveFolder, isMobileDevice } from '../utils/googleDrive';
 import { DEFAULT_APP_SETTINGS, DEFAULT_WATERMARK_CONFIG } from '../utils/storage';
 
 interface BackendSettingsPageProps {
@@ -60,6 +65,18 @@ export const BackendSettingsPage: React.FC<BackendSettingsPageProps> = ({
   const [isDriveTesting, setIsDriveTesting] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [lastCreatedFolderUrl, setLastCreatedFolderUrl] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState<boolean>(false);
+
+  const currentHostname = typeof window !== 'undefined' ? window.location.hostname : '';
+
+  const handleCopyHostname = () => {
+    if (navigator.clipboard && currentHostname) {
+      navigator.clipboard.writeText(currentHostname);
+      setCopiedDomain(true);
+      onShowToast(`Copied "${currentHostname}" to clipboard!`, 'success');
+      setTimeout(() => setCopiedDomain(false), 3000);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -155,15 +172,22 @@ export const BackendSettingsPage: React.FC<BackendSettingsPageProps> = ({
     { path: 'Download/GPS_Photos', desc: 'Standard device downloads directory' },
   ];
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async (forceRedirect: boolean = false) => {
     try {
       setIsSigningIn(true);
-      const res = await googleSignIn();
+      const res = await googleSignIn(forceRedirect);
       if (res?.user) {
         onShowToast(`Connected as ${res.user.displayName || res.user.email}`, 'success');
+      } else if (forceRedirect) {
+        onShowToast('Redirecting to Google Account Sign-In...', 'info');
       }
     } catch (err: any) {
-      onShowToast(`Google Sign-In failed: ${err.message}`, 'error');
+      console.error('Sign-in error:', err);
+      if (err.message?.includes('auth/unauthorized-domain') || err.message?.includes('not authorized in Firebase Console')) {
+        onShowToast(`Domain unauthorized: Add "${currentHostname}" in Firebase Console -> Authentication -> Authorized Domains`, 'error');
+      } else {
+        onShowToast(`Google Sign-In failed: ${err.message}`, 'error');
+      }
     } finally {
       setIsSigningIn(false);
     }
@@ -717,33 +741,95 @@ export const BackendSettingsPage: React.FC<BackendSettingsPageProps> = ({
                   </div>
 
                   {/* Sign In / Sign Out Button */}
-                  <div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     {currentUser ? (
                       <button
                         onClick={handleGoogleLogout}
-                        className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 text-xs font-semibold flex items-center gap-2 transition-colors"
+                        className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
                       >
                         <LogOut className="w-4 h-4" />
                         <span>Disconnect Account</span>
                       </button>
                     ) : (
-                      <button
-                        onClick={handleGoogleSignIn}
-                        disabled={isSigningIn}
-                        className="px-5 py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-bold flex items-center gap-2.5 transition-all shadow-md active:scale-95 disabled:opacity-50"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 48 48">
-                          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                        </svg>
-                        <span>{isSigningIn ? 'Connecting...' : 'Sign in with Google'}</span>
-                      </button>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <button
+                          onClick={() => handleGoogleSignIn(false)}
+                          disabled={isSigningIn}
+                          className="px-4 py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50"
+                          title="Standard Google OAuth Sign-In (Best for Desktop & Chrome)"
+                        >
+                          <svg className="w-4 h-4 shrink-0" viewBox="0 0 48 48">
+                            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                          </svg>
+                          <span>{isSigningIn ? 'Connecting...' : 'Sign in with Google'}</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleGoogleSignIn(true)}
+                          disabled={isSigningIn}
+                          className="px-3.5 py-2.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-95 disabled:opacity-50"
+                          title="Recommended for Mobile: Full-page redirect without popups"
+                        >
+                          <Smartphone className="w-3.5 h-3.5 shrink-0 text-blue-400" />
+                          <span>Mobile Redirect Sign-In</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
+
+              {/* Mobile Sign-in Troubleshooting & Authorized Domains Helper */}
+              {!currentUser && (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-100 text-xs space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-bold text-amber-300">Why does the login popup vanish on mobile?</div>
+                      <div className="text-[11px] text-amber-200/80 mt-1 leading-relaxed">
+                        On mobile devices (Android Chrome, iOS Safari, or preview webviews), popup windows are automatically blocked or closed due to cross-origin tracking policies.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-black/40 rounded-xl border border-amber-500/20 space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="text-[11px] text-zinc-300">
+                        <span className="font-semibold text-white">Your Current Web Domain:</span>
+                        <span className="font-mono text-emerald-400 ml-1.5 bg-black/60 px-2 py-0.5 rounded border border-emerald-500/30 select-all">
+                          {currentHostname || 'localhost'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={handleCopyHostname}
+                        className="flex items-center justify-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 rounded-lg text-[11px] font-medium transition-colors shrink-0"
+                      >
+                        {copiedDomain ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedDomain ? 'Copied Domain!' : 'Copy Domain'}</span>
+                      </button>
+                    </div>
+
+                    <div className="text-[10px] text-zinc-400 pt-1 border-t border-white/5 space-y-1">
+                      <div className="font-semibold text-amber-200">How to Fix (2 Solutions):</div>
+                      <div className="flex items-start gap-1.5">
+                        <span className="font-bold text-blue-400 shrink-0">1. Instant Solution:</span>
+                        <span>
+                          Tap the <span className="font-semibold text-blue-300">"Mobile Redirect Sign-In"</span> button above. It navigates directly to Google and redirects back without opening popups.
+                        </span>
+                      </div>
+                      <div className="flex items-start gap-1.5">
+                        <span className="font-bold text-amber-400 shrink-0">2. Firebase Domain Whitelist:</span>
+                        <span>
+                          Go to <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" className="text-blue-400 underline">Firebase Console</a> &gt; <strong>Authentication</strong> &gt; <strong>Settings</strong> &gt; <strong>Authorized Domains</strong> &gt; Add <code className="text-emerald-300">{currentHostname}</code>.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Auto Sync Toggle */}
               <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-between">
