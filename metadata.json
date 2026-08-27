@@ -1,0 +1,11 @@
+{
+  "name": "GPS Watermark Camera",
+  "description": "Native Android GPS Camera application built with Kotlin and Jetpack Compose that captures photos and bakes live GPS location metadata, address, altitude, and timestamp directly onto the image bitstream.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
