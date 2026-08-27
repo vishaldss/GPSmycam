@@ -50,10 +50,11 @@ export function hexToRgba(hex: string, opacity: number): string {
  * matching the Android Canvas / Paint implementation.
  */
 export async function applyWatermarkToImage(
-  sourceImage: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement,
+  sourceImage: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement | ImageBitmap,
   location: GPSLocationData,
   config: WatermarkConfig,
-  customTimestamp?: number
+  customTimestamp?: number,
+  exportQuality: number = 0.98
 ): Promise<{ dataUrl: string; width: number; height: number; blob: Blob }> {
   // Determine intrinsic dimensions
   let srcWidth = 0;
@@ -65,12 +66,15 @@ export async function applyWatermarkToImage(
   } else if (sourceImage instanceof HTMLImageElement) {
     srcWidth = sourceImage.naturalWidth || sourceImage.width;
     srcHeight = sourceImage.naturalHeight || sourceImage.height;
-  } else {
+  } else if (typeof ImageBitmap !== 'undefined' && sourceImage instanceof ImageBitmap) {
     srcWidth = sourceImage.width;
     srcHeight = sourceImage.height;
+  } else {
+    srcWidth = (sourceImage as HTMLCanvasElement).width;
+    srcHeight = (sourceImage as HTMLCanvasElement).height;
   }
 
-  // Create high-resolution rendering canvas
+  // Create high-resolution rendering canvas with image smoothing enabled
   const canvas = document.createElement('canvas');
   canvas.width = srcWidth;
   canvas.height = srcHeight;
@@ -79,6 +83,9 @@ export async function applyWatermarkToImage(
   if (!ctx) {
     throw new Error('Unable to initialize 2D canvas context');
   }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   // Draw base photo frame
   ctx.drawImage(sourceImage, 0, 0, srcWidth, srcHeight);
@@ -287,7 +294,8 @@ export async function applyWatermarkToImage(
 
   ctx.restore();
 
-  // Export to high-quality JPEG blob and data URL
+  // Export to high-quality JPEG blob and data URL using configured quality
+  const finalQuality = Math.min(1.0, Math.max(0.8, exportQuality || 0.98));
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -295,7 +303,7 @@ export async function applyWatermarkToImage(
           reject(new Error('Failed to generate image blob'));
           return;
         }
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        const dataUrl = canvas.toDataURL('image/jpeg', finalQuality);
         resolve({
           dataUrl,
           width: srcWidth,
@@ -304,7 +312,7 @@ export async function applyWatermarkToImage(
         });
       },
       'image/jpeg',
-      0.95
+      finalQuality
     );
   });
 }

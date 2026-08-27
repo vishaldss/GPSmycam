@@ -23,12 +23,22 @@ import {
   ShieldAlert,
   ArrowRight,
   HelpCircle,
+  Camera,
+  Compass,
+  MapPin,
+  Maximize2,
+  Radio,
+  SlidersHorizontal,
+  Globe,
+  Crosshair,
+  Zap,
 } from 'lucide-react';
 import {
   AppSettings,
   AppTheme,
   CoordinateFormat,
   DateFormatOption,
+  PhotoResolution,
   WatermarkConfig,
   WatermarkFontFamily,
   WatermarkFontWeight,
@@ -49,7 +59,7 @@ interface BackendSettingsPageProps {
   onShowToast: (msg: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-type TabType = 'theme' | 'font' | 'storage' | 'drive';
+type TabType = 'theme' | 'quality' | 'gps' | 'font' | 'storage' | 'drive';
 
 export const BackendSettingsPage: React.FC<BackendSettingsPageProps> = ({
   isOpen,
@@ -277,9 +287,11 @@ export const BackendSettingsPage: React.FC<BackendSettingsPageProps> = ({
         <div className="flex items-center gap-1 px-6 py-2.5 bg-zinc-900/30 border-b border-zinc-800/60 overflow-x-auto shrink-0">
           {[
             { id: 'theme', label: '1. App Theme', icon: Palette },
-            { id: 'font', label: '2. GPS Font & Watermark', icon: Type },
-            { id: 'storage', label: '3. Mobile Camera Folder', icon: Smartphone },
-            { id: 'drive', label: '4. Google Drive & Gmail Sync', icon: Cloud },
+            { id: 'quality', label: '2. High-Res & 4K Camera', icon: Camera, highlight: true },
+            { id: 'gps', label: '3. Google Maps & Accuracy', icon: Compass, highlight: true },
+            { id: 'font', label: '4. GPS Font & Watermark', icon: Type },
+            { id: 'storage', label: '5. Mobile Camera Folder', icon: Smartphone },
+            { id: 'drive', label: '6. Google Drive & Gmail Sync', icon: Cloud },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -295,6 +307,9 @@ export const BackendSettingsPage: React.FC<BackendSettingsPageProps> = ({
               >
                 <Icon className="w-4 h-4" />
                 <span>{tab.label}</span>
+                {tab.highlight && !isActive && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                )}
               </button>
             );
           })}
@@ -357,6 +372,249 @@ export const BackendSettingsPage: React.FC<BackendSettingsPageProps> = ({
                   <p className="text-zinc-400 mt-0.5">
                     All themes use anti-reflective mathematically balanced palettes tested for intense direct sunlight and night-surveying.
                   </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ===================== TAB 2: HIGH-RES QUALITY & 4K CAMERA ===================== */}
+          {activeTab === 'quality' && (
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                    Photo Resolution & Hardware Capture Profile
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    High-Res Engine Active
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mb-4">
+                  Select the target resolution for camera capture and watermark rendering. Max Native Sensor uses direct hardware sensor grab.
+                </p>
+
+                {/* Resolution Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    {
+                      id: 'max_sensor',
+                      name: 'Max Hardware Sensor Resolution',
+                      badge: 'Best Quality / Native MP',
+                      resolution: 'Up to 12MP / 48MP / 64MP Sensor Native',
+                      desc: 'Uses modern ImageCapture hardware pipeline to grab full uncompressed native camera frames directly from sensor.',
+                      recommended: true,
+                    },
+                    {
+                      id: '4k',
+                      name: '4K Ultra HD (3840 × 2160)',
+                      badge: '8.3 Megapixels',
+                      resolution: '3840 × 2160 px (16:9) or 3840 × 2880 px (4:3)',
+                      desc: 'Ultra crisp professional detail. Ideal for engineering, architectural inspection, and land surveying.',
+                      recommended: false,
+                    },
+                    {
+                      id: '2k',
+                      name: '2K Quad HD (2560 × 1440)',
+                      badge: '3.7 Megapixels',
+                      resolution: '2560 × 1440 px',
+                      desc: 'High clarity with balanced storage size and quick Google Drive uploads.',
+                      recommended: false,
+                    },
+                    {
+                      id: '1080p',
+                      name: 'Full HD 1080p (1920 × 1080)',
+                      badge: '2.1 Megapixels',
+                      resolution: '1920 × 1080 px',
+                      desc: 'Fastest processing speed. Ideal for low-memory devices or slow network connections.',
+                      recommended: false,
+                    },
+                  ].map((res) => {
+                    const isSelected = appSettings.photoResolution === res.id;
+                    return (
+                      <button
+                        key={res.id}
+                        onClick={() => {
+                          onSaveAppSettings({ ...appSettings, photoResolution: res.id as PhotoResolution });
+                          onShowToast(`Resolution set to ${res.name}`, 'success');
+                        }}
+                        className={`p-4 rounded-2xl border text-left transition-all relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-blue-600/15 border-blue-500 ring-2 ring-blue-500/30'
+                            : 'bg-zinc-950/80 border-zinc-800 hover:border-zinc-700'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="font-bold text-white text-xs sm:text-sm">{res.name}</span>
+                            {isSelected && <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />}
+                          </div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-zinc-800 text-zinc-300">
+                              {res.badge}
+                            </span>
+                            {res.recommended && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                                Recommended
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-zinc-400">{res.desc}</p>
+                        </div>
+
+                        <div className="text-[10px] font-mono text-zinc-500 mt-3 pt-2 border-t border-zinc-800/80">
+                          Target Matrix: {res.resolution}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* JPEG Quality Slider */}
+              <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      JPEG Encoding & Sharpness Quality
+                    </span>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      Controls compression ratio. 98%–100% preserves maximum optical clarity and prevents artifacting.
+                    </p>
+                  </div>
+                  <span className="font-mono text-base text-blue-400 font-bold px-3 py-1 bg-blue-500/15 rounded-xl border border-blue-500/30">
+                    {Math.round(appSettings.imageQuality * 100)}%
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <input
+                    type="range"
+                    min="0.80"
+                    max="1.0"
+                    step="0.02"
+                    value={appSettings.imageQuality}
+                    onChange={(e) =>
+                      onSaveAppSettings({ ...appSettings, imageQuality: parseFloat(e.target.value) })
+                    }
+                    className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  />
+
+                  <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
+                    <span>80% (Standard)</span>
+                    <span>90% (High Detail)</span>
+                    <span className="text-blue-400 font-bold">98% (Ultra Sharp / Recommended)</span>
+                    <span>100% (Lossless JPEG)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Hardware Sensor Direct Capture Switch */}
+              <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold text-white flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-400" />
+                    <span>Direct Hardware Sensor Shutter Mode (ImageCapture API)</span>
+                  </div>
+                  <div className="text-[11px] text-zinc-400 mt-0.5">
+                    Bypasses video stream downsampling to grab the full uncompressed frame directly from the hardware camera sensor.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={appSettings.enableSensorDirectCapture}
+                  onChange={(e) =>
+                    onSaveAppSettings({ ...appSettings, enableSensorDirectCapture: e.target.checked })
+                  }
+                  className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500 bg-zinc-950 border-zinc-700 cursor-pointer"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* ===================== TAB 3: GOOGLE MAPS & GPS ACCURACY ===================== */}
+          {activeTab === 'gps' && (
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                    Google Maps Platform Geocoding & Rooftop GPS
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    Google Maps Ready
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mb-4">
+                  Configure high-accuracy Google Maps reverse geocoding, rooftop address resolution, and satellite calibration.
+                </p>
+
+                {/* Google Maps Feature Switch */}
+                <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-between mb-4">
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <Globe className="w-4 h-4 text-blue-400" />
+                      <span>Use Google Maps Location Services</span>
+                    </div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">
+                      Resolves street numbers, landmarks, municipal zones, and precision rooftop locations.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={appSettings.useGoogleMaps}
+                    onChange={(e) =>
+                      onSaveAppSettings({ ...appSettings, useGoogleMaps: e.target.checked })
+                    }
+                    className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500 bg-zinc-950 border-zinc-700 cursor-pointer"
+                  />
+                </div>
+
+                {/* Google Maps Platform API Key Input */}
+                <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-zinc-200">
+                      Google Maps Platform API Key (Optional)
+                    </label>
+                    <a
+                      href="https://console.cloud.google.com/google/maps-apis/credentials?utm_campaign=gmp_mcp_codeassist_v1_aistudio"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                    >
+                      <span>Get API Key</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">
+                    Enter your Google Maps Geocoding API key for direct Google Cloud rooftop lookups. If left blank, the app uses built-in high-precision geocoding.
+                  </p>
+                  <input
+                    type="text"
+                    value={appSettings.googleMapsApiKey || ''}
+                    onChange={(e) =>
+                      onSaveAppSettings({ ...appSettings, googleMapsApiKey: e.target.value })
+                    }
+                    placeholder="AIzaSy..."
+                    className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-700 rounded-xl text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* GPS Drift & Indoor Accuracy Solution Info */}
+                <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-xs space-y-2 mt-4">
+                  <div className="font-bold text-white flex items-center gap-2">
+                    <Crosshair className="w-4 h-4 text-blue-400" />
+                    <span>How to get 100% accurate GPS on Mobile & Desktop:</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-zinc-300 text-[11px]">
+                    <li>
+                      <strong className="text-white">Under Open Sky:</strong> Hardware GPS satellites lock within ±2 to ±5 meters.
+                    </li>
+                    <li>
+                      <strong className="text-white">Indoors / In Buildings:</strong> Satellite signals may degrade to ±30m. Tap the <strong>"Satellite Status Pill"</strong> in the top header or HUD to search your exact building/landmark with Google Maps and lock rooftop coordinates!
+                    </li>
+                    <li>
+                      <strong className="text-white">High Refresh Rate:</strong> The app continuously listens with <code className="text-blue-300">enableHighAccuracy: true</code> to refine accuracy every second.
+                    </li>
+                  </ul>
                 </div>
               </div>
             </div>

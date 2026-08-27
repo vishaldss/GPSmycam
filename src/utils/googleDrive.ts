@@ -9,7 +9,12 @@ import {
 } from 'firebase/auth';
 import { app, auth } from '../firebase';
 
-export const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+export const DRIVE_SCOPES = [
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive.appdata',
+  'https://www.googleapis.com/auth/drive.photos.readonly',
+];
 
 const provider = new GoogleAuthProvider();
 DRIVE_SCOPES.forEach((scope) => provider.addScope(scope));

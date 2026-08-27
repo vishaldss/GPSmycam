@@ -1,3 +1,5 @@
+export type PhotoResolution = '4k' | '2k' | '1080p' | 'max_sensor';
+
 export interface GPSLocationData {
   latitude: number;
   longitude: number;
@@ -12,6 +14,7 @@ export interface GPSLocationData {
   country: string;
   postalCode: string;
   isMock?: boolean;
+  source?: 'hardware_gps' | 'google_maps' | 'manual_search' | 'preset';
 }
 
 export type WatermarkPosition = 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right' | 'bottom-bar' | 'top-bar';
@@ -53,7 +56,11 @@ export interface AppSettings {
   autoSaveToDevice: boolean;
   autoSyncGoogleDrive: boolean;
   driveRootFolder: string;
-  imageQuality: number; // 0.8 to 1.0
+  imageQuality: number; // 0.80 to 1.0
+  photoResolution: PhotoResolution;
+  useGoogleMaps: boolean;
+  googleMapsApiKey?: string;
+  enableSensorDirectCapture: boolean;
   filenamePrefix: string;
 }
 

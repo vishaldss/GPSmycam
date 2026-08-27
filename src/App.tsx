@@ -4,7 +4,7 @@ import { CameraViewfinder } from './components/CameraViewfinder';
 import { PermissionHandler } from './components/PermissionHandler';
 import { GalleryDrawer } from './components/GalleryDrawer';
 import { BackendSettingsPage } from './components/BackendSettingsPage';
-import { LocationPresetModal } from './components/LocationPresetModal';
+import { LocationSearchModal } from './components/LocationSearchModal';
 import { AndroidCodeModal } from './components/AndroidCodeModal';
 import { AndroidToast } from './components/AndroidToast';
 import {
@@ -386,20 +386,39 @@ export default function App() {
         onShowToast={showToast}
       />
 
-      {/* GPS Location Source / Preset Modal */}
-      <LocationPresetModal
-        isOpen={isLocationPresetsOpen}
-        onClose={() => setIsLocationPresetsOpen(false)}
-        currentLocation={currentLocation}
-        onSelectPreset={(loc) => {
-          setCurrentLocation(loc);
-          showToast(`GPS set to ${loc.city || 'custom location'}`, 'info');
-        }}
-        onUseLiveDeviceGps={() => {
-          startLiveLocationTracking();
-          showToast('Switched to Live Device GPS', 'success');
-        }}
-      />
+      {/* Google Maps GPS Location Search & Rooftop Accuracy Refinement Modal */}
+      {isLocationPresetsOpen && (
+        <LocationSearchModal
+          currentLocation={
+            currentLocation || {
+              latitude: 23.2599,
+              longitude: 77.4126,
+              altitude: 527,
+              accuracy: 2.5,
+              heading: 145,
+              speed: null,
+              timestamp: Date.now(),
+              address: 'Upper Lake, VIP Road, Bhopal, MP, India',
+              city: 'Bhopal',
+              state: 'Madhya Pradesh',
+              country: 'India',
+              postalCode: '462001',
+              isMock: true,
+              source: 'google_maps',
+            }
+          }
+          appSettings={appSettings}
+          onUpdateLocation={(newLoc) => {
+            setCurrentLocation(newLoc);
+            showToast(`GPS location refined: ${newLoc.address}`, 'success');
+          }}
+          onRefreshHardwareGps={async () => {
+            startLiveLocationTracking();
+            showToast('Recalibrating Hardware GPS Satellites...', 'info');
+          }}
+          onClose={() => setIsLocationPresetsOpen(false)}
+        />
+      )}
 
       {/* Android Kotlin Project Source Code & ZIP Exporter */}
       <AndroidCodeModal

@@ -12,11 +12,16 @@ import {
   Navigation,
   Sliders,
   Cloud,
+  Compass,
+  Crosshair,
+  Globe,
+  Sparkles,
 } from 'lucide-react';
 import { GPSLocationData, WatermarkConfig, CapturedPhoto, AppSettings } from '../types';
 import { GPSOverlayHUD } from './GPSOverlayHUD';
 import { applyWatermarkToImage } from '../utils/watermarkEngine';
 import { generatePhotoFilename, savePhotoToMediaStore, downloadPhotoFile } from '../utils/storage';
+import { getGpsSignalQuality } from '../utils/geoUtils';
 import { User } from 'firebase/auth';
 
 interface CameraViewfinderProps {
@@ -63,8 +68,11 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
   const [isShutterFlashing, setIsShutterFlashing] = useState(false);
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [activeStreamResolution, setActiveStreamResolution] = useState<{ width: number; height: number } | null>(null);
 
-  // Initialize camera stream
+  const gpsQuality = getGpsSignalQuality(location?.accuracy ?? null);
+
+  // Initialize camera stream with dynamic High-Res profiles
   useEffect(() => {
     let isMounted = true;
 
@@ -74,12 +82,28 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
           streamRef.current.getTracks().forEach((track) => track.stop());
         }
 
+        // Calculate target constraints based on appSettings.photoResolution
+        let targetWidth = { ideal: 3840, min: 1920 };
+        let targetHeight = { ideal: 2160, min: 1080 };
+
+        if (appSettings.photoResolution === '1080p') {
+          targetWidth = { ideal: 1920, min: 1280 };
+          targetHeight = { ideal: 1080, min: 720 };
+        } else if (appSettings.photoResolution === '2k') {
+          targetWidth = { ideal: 2560, min: 1920 };
+          targetHeight = { ideal: 1440, min: 1080 };
+        } else if (appSettings.photoResolution === 'max_sensor' || appSettings.photoResolution === '4k') {
+          targetWidth = { ideal: 4096, min: 1920 };
+          targetHeight = { ideal: 3072, min: 1080 };
+        }
+
         const constraints: MediaStreamConstraints = {
           audio: false,
           video: {
             facingMode: { ideal: facingMode },
-            width: { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 },
+            width: targetWidth,
+            height: targetHeight,
+            frameRate: { ideal: 30, max: 60 },
           },
         };
 
@@ -92,11 +116,17 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
           videoRef.current.play().catch(console.error);
         }
 
-        // Check torch capability
+        // Check torch & active track settings
         const track = stream.getVideoTracks()[0];
-        if (track && 'getCapabilities' in track) {
-          const caps = (track as any).getCapabilities();
-          setHasTorch(Boolean(caps?.torch));
+        if (track) {
+          if ('getCapabilities' in track) {
+            const caps = (track as any).getCapabilities();
+            setHasTorch(Boolean(caps?.torch));
+          }
+          const settings = track.getSettings();
+          if (settings.width && settings.height) {
+            setActiveStreamResolution({ width: settings.width, height: settings.height });
+          }
         }
 
         setCameraError(null);
@@ -114,7 +144,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [facingMode]);
+  }, [facingMode, appSettings.photoResolution]);
 
   // Flip Camera
   const toggleCameraFacing = () => {
@@ -187,7 +217,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
     } catch {}
   };
 
-  // Photo Capture Trigger
+  // Photo Capture Trigger with Native Hardware Sensor Grab
   const handleCapture = async () => {
     if (isCapturing) return;
 
@@ -200,27 +230,50 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
     }, 250);
 
     try {
-      let sourceElement: HTMLVideoElement | HTMLCanvasElement | null = videoRef.current;
+      let sourceElement: HTMLVideoElement | HTMLCanvasElement | ImageBitmap | null = null;
 
-      // Fallback canvas if video element not ready or mock
+      // 1. Try modern hardware ImageCapture API on the video track for full sensor resolution
+      if (appSettings.enableSensorDirectCapture && streamRef.current) {
+        const track = streamRef.current.getVideoTracks()[0];
+        if (track && typeof (window as any).ImageCapture !== 'undefined') {
+          try {
+            const imageCapture = new (window as any).ImageCapture(track);
+            const blob = await imageCapture.takePhoto({
+              fillLightMode: isTorchOn ? 'flash' : 'off',
+            });
+            if (blob && typeof createImageBitmap !== 'undefined') {
+              sourceElement = await createImageBitmap(blob);
+            }
+          } catch (e) {
+            console.warn('ImageCapture sensor fallback:', e);
+          }
+        }
+      }
+
+      // 2. Fallback to video element
+      if (!sourceElement) {
+        sourceElement = videoRef.current;
+      }
+
+      // 3. Fallback canvas if video element not ready
       if (!sourceElement || (sourceElement instanceof HTMLVideoElement && sourceElement.readyState < 2)) {
         const dummyCanvas = document.createElement('canvas');
-        dummyCanvas.width = 1920;
-        dummyCanvas.height = 1080;
+        dummyCanvas.width = 3840;
+        dummyCanvas.height = 2160;
         const ctx = dummyCanvas.getContext('2d')!;
         
         // Render rich scenic backdrop
-        const grad = ctx.createLinearGradient(0, 0, 1920, 1080);
-        grad.addColorStop(0, '#1e293b');
-        grad.addColorStop(0.5, '#0f172a');
-        grad.addColorStop(1, '#020617');
+        const grad = ctx.createLinearGradient(0, 0, 3840, 2160);
+        grad.addColorStop(0, '#0f172a');
+        grad.addColorStop(0.5, '#020617');
+        grad.addColorStop(1, '#000000');
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 1920, 1080);
+        ctx.fillRect(0, 0, 3840, 2160);
 
-        ctx.fillStyle = '#64748b';
-        ctx.font = 'bold 48px sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 72px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('GPS CameraX Capture Frame', 960, 540);
+        ctx.fillText('4K High-Res Sensor Frame', 1920, 1080);
         sourceElement = dummyCanvas;
       }
 
@@ -229,7 +282,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
         latitude: 23.2599,
         longitude: 77.4126,
         altitude: 527,
-        accuracy: 3.5,
+        accuracy: 2.5,
         heading: 145,
         speed: null,
         timestamp: Date.now(),
@@ -239,17 +292,19 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
         country: 'India',
         postalCode: '462001',
         isMock: true,
+        source: 'google_maps',
       };
 
       const captureTimestamp = Date.now();
       const filename = generatePhotoFilename(appSettings.filenamePrefix || 'GPS_IMG', captureTimestamp);
 
-      // Execute Canvas Watermark Processing
+      // Execute Canvas Watermark Processing with user-configured export quality (up to 1.0)
       const result = await applyWatermarkToImage(
         sourceElement,
         activeLocation,
         watermarkConfig,
-        captureTimestamp
+        captureTimestamp,
+        appSettings.imageQuality || 0.98
       );
 
       const targetFolder = appSettings.mobileCameraFolder || 'DCIM/Camera';
@@ -276,7 +331,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
       }
 
       onPhotoCaptured(capturedPhoto);
-      onShowToast(`Saved to ${savedPath}`, 'success');
+      onShowToast(`High-Res Photo (${result.width}×${result.height}) saved to ${savedPath}`, 'success');
 
       // Auto-Sync to Google Drive daily date folder if enabled
       if (appSettings.autoSyncGoogleDrive && onUploadToDrive) {
@@ -305,30 +360,47 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
       ref={containerRef}
       className="relative w-full h-full flex flex-col items-center justify-between bg-[#0A0A0A] text-white overflow-hidden select-none font-sans"
     >
-      {/* Top Header Bar (Geometric Balance Theme) */}
-      <div className="w-full z-30 px-4 sm:px-6 py-3 bg-black/40 backdrop-blur-md border-b border-white/5 flex items-center justify-between">
-        <div className="flex items-center gap-3 sm:gap-6">
+      {/* Top Header Bar */}
+      <div className="w-full z-30 px-3 sm:px-6 py-2.5 bg-black/50 backdrop-blur-md border-b border-white/5 flex items-center justify-between">
+        <div className="flex items-center gap-2 sm:gap-4">
           <div className="text-xs sm:text-sm font-semibold tracking-tight uppercase flex items-center gap-1.5">
             <span>GPS CAMERA</span>
             <span className="text-blue-400 font-bold">PRO</span>
           </div>
+
           <div className="h-4 w-px bg-white/20 hidden sm:block" />
+
+          {/* GPS Accuracy Pill & Google Maps Trigger */}
           <button
             onClick={onOpenLocationPresets}
-            className="flex items-center gap-2 text-[10px] text-white/70 hover:text-white tracking-widest uppercase transition-colors"
-            title="GPS Signal & Location status (Click to change)"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all hover:scale-105 active:scale-95 ${gpsQuality.badgeColor} ${gpsQuality.textColor}`}
+            title="GPS Accuracy & Google Maps Rooftop Refinement (Click to adjust)"
           >
-            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.7)] shrink-0" />
-            <span className="hidden xs:inline">
-              {location?.isMock ? 'Simulated GPS' : 'High Accuracy GPS'}
+            <span>{gpsQuality.icon}</span>
+            <span>{gpsQuality.label}</span>
+            <span className="text-white/40 hidden md:inline">• Google Maps</span>
+          </button>
+
+          {/* High-Res Quality Badge */}
+          <button
+            onClick={onOpenSettings}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/10 hover:bg-white/15 text-zinc-200 border border-white/15 transition-all"
+            title="Image Quality & Resolution Settings (Click to configure)"
+          >
+            <Camera className="w-3 h-3 text-blue-400" />
+            <span>
+              {appSettings.photoResolution === 'max_sensor'
+                ? 'Max Sensor Native'
+                : appSettings.photoResolution.toUpperCase()}{' '}
+              • {Math.round((appSettings.imageQuality || 0.98) * 100)}%
             </span>
           </button>
 
           {/* Google Drive Status Indicator */}
-          <div className="h-4 w-px bg-white/20 hidden md:block" />
+          <div className="h-4 w-px bg-white/20 hidden lg:block" />
           <button
             onClick={onOpenSettings}
-            className={`hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-sans font-medium transition-colors ${
+            className={`hidden lg:flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-sans font-medium transition-colors ${
               currentUser
                 ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
                 : 'bg-white/5 text-zinc-400 hover:text-zinc-200 border border-white/10'
@@ -342,7 +414,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-2 sm:gap-3">
           {/* Flash Toggle */}
           <button
             id="btn-toggle-flash"
@@ -388,12 +460,12 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
             <Grid3X3 className="w-4 h-4" />
           </button>
 
-          {/* Watermark Settings */}
+          {/* Watermark & Camera Settings */}
           <button
             id="btn-watermark-settings"
             onClick={onOpenSettings}
-            className="p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white/80 transition-all active:scale-95"
-            title="Watermark Style & Format"
+            className="p-2 rounded-lg bg-blue-600/20 border border-blue-500/40 hover:bg-blue-600/30 text-blue-300 transition-all active:scale-95"
+            title="High Res, Google Maps & Watermark Settings"
           >
             <Sliders className="w-4 h-4" />
           </button>
@@ -430,7 +502,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
           {cameraError && (
             <div className="absolute inset-0 bg-[#121212] flex flex-col items-center justify-center p-6 text-center text-zinc-400">
               <Camera className="w-12 h-12 text-blue-400/60 mb-3 animate-pulse" />
-              <p className="text-sm font-semibold text-zinc-200 mb-1">Live Viewfinder Ready</p>
+              <p className="text-sm font-semibold text-zinc-200 mb-1">High-Res Viewfinder Ready</p>
               <p className="text-xs text-zinc-500 max-w-xs font-mono">
                 Click the shutter button below to capture and bake precision GPS coordinates into the photo.
               </p>
@@ -459,8 +531,12 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
           {/* Live Feed Status Pill (Top-Left) */}
           <div className="absolute top-4 left-4 z-20 flex flex-col gap-2 pointer-events-none">
             <div className="px-3 py-1 bg-black/60 backdrop-blur-md border border-white/10 rounded-full text-[10px] uppercase font-bold tracking-widest flex items-center gap-2 text-white/90">
-              <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.8)]" />
-              <span>Live Feed</span>
+              <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+              <span>
+                {activeStreamResolution
+                  ? `${activeStreamResolution.width}×${activeStreamResolution.height} HD`
+                  : 'Live 4K Feed'}
+              </span>
             </div>
           </div>
 
@@ -517,10 +593,10 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
         </div>
       </div>
 
-      {/* Bottom Shutter & Controls Dock (Geometric Balance Theme) */}
+      {/* Bottom Shutter & Controls Dock */}
       <div className="w-full h-36 sm:h-40 bg-black border-t border-white/5 px-6 sm:px-16 flex flex-col justify-center relative z-30">
         <div className="w-full max-w-2xl mx-auto flex items-center justify-between">
-          {/* Gallery Button: Geometric container with rounded corners */}
+          {/* Gallery Button */}
           <button
             id="btn-open-gallery"
             onClick={onOpenGallery}
@@ -546,7 +622,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
               className={`w-20 h-20 sm:w-22 sm:h-22 rounded-full border-[3px] border-white flex items-center justify-center p-1.5 hover:scale-105 active:scale-95 transition-transform cursor-pointer disabled:opacity-50 ${
                 isCapturing ? 'opacity-75' : ''
               }`}
-              title="Capture photo and bake GPS watermark"
+              title="Capture High-Res Photo & Bake GPS Watermark"
             >
               <div
                 className={`w-full h-full rounded-full transition-all ${
@@ -556,7 +632,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
             </button>
           </div>
 
-          {/* Camera Flip Button: Circular subtle glass container */}
+          {/* Camera Flip Button */}
           <button
             id="btn-flip-camera"
             onClick={toggleCameraFacing}
@@ -573,19 +649,19 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
             onClick={() => onShowToast('Camera mode active', 'info')}
             className="text-[10px] text-blue-400 font-bold uppercase tracking-widest transition-colors"
           >
-            Photo
+            Photo (High Res)
           </button>
           <button
             onClick={onOpenLocationPresets}
             className="text-[10px] text-white/40 hover:text-white/80 font-bold uppercase tracking-widest transition-colors"
           >
-            GPS Overlay
+            Google Maps GPS
           </button>
           <button
             onClick={onOpenSettings}
             className="text-[10px] text-white/40 hover:text-white/80 font-bold uppercase tracking-widest transition-colors"
           >
-            Metadata
+            Settings
           </button>
         </div>
       </div>

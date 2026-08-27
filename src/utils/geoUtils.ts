@@ -46,15 +46,130 @@ export function getHeadingDirection(heading: number | null): string {
 // Simple in-memory cache for reverse geocoding to avoid rate limits
 const geocodeCache = new Map<string, { address: string; city: string; state: string; country: string; postalCode: string }>();
 
+export interface GpsSignalQuality {
+  level: 'excellent' | 'good' | 'moderate' | 'poor' | 'unknown';
+  label: string;
+  badgeColor: string;
+  textColor: string;
+  icon: string;
+  meters: number | null;
+}
+
+export function getGpsSignalQuality(accuracy: number | null): GpsSignalQuality {
+  if (accuracy === null || isNaN(accuracy)) {
+    return {
+      level: 'unknown',
+      label: 'Acquiring GPS...',
+      badgeColor: 'bg-zinc-700/60 border-zinc-600',
+      textColor: 'text-zinc-400',
+      icon: '📡',
+      meters: null,
+    };
+  }
+
+  if (accuracy <= 6) {
+    return {
+      level: 'excellent',
+      label: `±${accuracy.toFixed(1)}m Satellite Lock`,
+      badgeColor: 'bg-emerald-500/20 border-emerald-500/40',
+      textColor: 'text-emerald-300',
+      icon: '🛰️',
+      meters: accuracy,
+    };
+  }
+
+  if (accuracy <= 15) {
+    return {
+      level: 'good',
+      label: `±${accuracy.toFixed(1)}m GPS Fix`,
+      badgeColor: 'bg-blue-500/20 border-blue-500/40',
+      textColor: 'text-blue-300',
+      icon: '📍',
+      meters: accuracy,
+    };
+  }
+
+  if (accuracy <= 35) {
+    return {
+      level: 'moderate',
+      label: `±${Math.round(accuracy)}m Cell/Wi-Fi`,
+      badgeColor: 'bg-amber-500/20 border-amber-500/40',
+      textColor: 'text-amber-300',
+      icon: '📶',
+      meters: accuracy,
+    };
+  }
+
+  return {
+    level: 'poor',
+    label: `±${Math.round(accuracy)}m Weak GPS (IP)`,
+    badgeColor: 'bg-rose-500/20 border-rose-500/40',
+    textColor: 'text-rose-300',
+    icon: '⚠️',
+    meters: accuracy,
+  };
+}
+
+/**
+ * Reverse geocodes coordinates with Google Maps API (if key provided) or Nominatim rooftop resolution
+ */
 export async function reverseGeocode(
   lat: number,
-  lon: number
+  lon: number,
+  googleMapsApiKey?: string
 ): Promise<{ address: string; city: string; state: string; country: string; postalCode: string }> {
-  const cacheKey = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  const cacheKey = `${lat.toFixed(4)},${lon.toFixed(4)}`;
   if (geocodeCache.has(cacheKey)) {
     return geocodeCache.get(cacheKey)!;
   }
 
+  // 1. Try Google Maps Geocoding API if key is provided
+  if (googleMapsApiKey && googleMapsApiKey.trim().length > 10) {
+    try {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${encodeURIComponent(googleMapsApiKey.trim())}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'OK' && json.results && json.results.length > 0) {
+          const resultObj = json.results[0];
+          let city = '';
+          let state = '';
+          let country = '';
+          let postalCode = '';
+
+          for (const comp of resultObj.address_components || []) {
+            if (comp.types.includes('locality') || comp.types.includes('postal_town')) {
+              city = comp.long_name;
+            }
+            if (comp.types.includes('administrative_area_level_1')) {
+              state = comp.long_name;
+            }
+            if (comp.types.includes('country')) {
+              country = comp.long_name;
+            }
+            if (comp.types.includes('postal_code')) {
+              postalCode = comp.long_name;
+            }
+          }
+
+          const parsed = {
+            address: resultObj.formatted_address || `${lat.toFixed(5)}°, ${lon.toFixed(5)}°`,
+            city: city || state || 'GPS Area',
+            state: state || country,
+            country: country || '',
+            postalCode: postalCode || '',
+          };
+
+          geocodeCache.set(cacheKey, parsed);
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Google Maps geocoding error:', e);
+    }
+  }
+
+  // 2. High-Precision OpenStreetMap / Photon Fallback
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -65,7 +180,7 @@ export async function reverseGeocode(
         signal: controller.signal,
         headers: {
           'Accept-Language': 'en',
-          'User-Agent': 'GPSWatermarkCameraAndroidApp/1.0',
+          'User-Agent': 'GPSWatermarkCameraPro/2.4',
         },
       }
     );
@@ -75,14 +190,23 @@ export async function reverseGeocode(
       const data = await response.json();
       const addr = data.address || {};
       
+      const houseNumber = addr.house_number || '';
       const road = addr.road || addr.pedestrian || addr.street || addr.neighbourhood || addr.suburb || '';
+      const area = addr.suburb || addr.neighbourhood || addr.commercial || addr.residential || '';
       const city = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
       const state = addr.state || addr.region || '';
       const country = addr.country || '';
       const postalCode = addr.postcode || '';
 
-      const parts = [road, city, state, country].filter(Boolean);
-      const fullAddress = parts.length > 0 ? parts.join(', ') : (data.display_name?.split(',').slice(0, 3).join(',') || 'Location Identified');
+      const parts = [
+        houseNumber ? `${houseNumber} ${road}` : road,
+        area !== road ? area : '',
+        city,
+        state,
+        country,
+      ].filter(Boolean);
+
+      const fullAddress = parts.length > 0 ? parts.join(', ') : (data.display_name?.split(',').slice(0, 4).join(', ') || `${lat.toFixed(4)}°, ${lon.toFixed(4)}°`);
 
       const result = {
         address: fullAddress,
@@ -99,14 +223,108 @@ export async function reverseGeocode(
     // Fallback if network offline or blocked
   }
 
-  // Generic fallback if network fails
+  // Generic fallback
   return {
-    address: `${lat.toFixed(4)}°, ${lon.toFixed(4)}°`,
-    city: 'Current Location',
+    address: `${lat.toFixed(5)}°, ${lon.toFixed(5)}°`,
+    city: 'GPS Coordinates',
     state: '',
     country: '',
     postalCode: '',
   };
+}
+
+/**
+ * Searches for places or addresses using Google Maps or Photon geocoding
+ */
+export async function searchAddressOrLandmark(
+  query: string,
+  googleMapsApiKey?: string
+): Promise<{
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  city: string;
+  state: string;
+  country: string;
+  postalCode: string;
+}[]> {
+  if (!query || query.trim().length < 2) return [];
+  const cleanQ = query.trim();
+
+  // 1. If Google Maps API Key provided
+  if (googleMapsApiKey && googleMapsApiKey.trim().length > 10) {
+    try {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(cleanQ)}&key=${encodeURIComponent(googleMapsApiKey.trim())}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'OK' && json.results) {
+          return json.results.slice(0, 5).map((r: any) => {
+            let city = '';
+            let state = '';
+            let country = '';
+            let postalCode = '';
+
+            for (const comp of r.address_components || []) {
+              if (comp.types.includes('locality') || comp.types.includes('postal_town')) city = comp.long_name;
+              if (comp.types.includes('administrative_area_level_1')) state = comp.long_name;
+              if (comp.types.includes('country')) country = comp.long_name;
+              if (comp.types.includes('postal_code')) postalCode = comp.long_name;
+            }
+
+            return {
+              name: r.formatted_address?.split(',')[0] || cleanQ,
+              address: r.formatted_address,
+              latitude: r.geometry.location.lat,
+              longitude: r.geometry.location.lng,
+              city: city || state,
+              state: state || country,
+              country,
+              postalCode,
+            };
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Google search failed:', e);
+    }
+  }
+
+  // 2. OpenStreetMap / Photon Search
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanQ)}&limit=6&addressdetails=1`, {
+      headers: {
+        'Accept-Language': 'en',
+        'User-Agent': 'GPSWatermarkCameraPro/2.4',
+      },
+    });
+    if (res.ok) {
+      const list = await res.json();
+      return list.map((item: any) => {
+        const addr = item.address || {};
+        const city = addr.city || addr.town || addr.village || addr.county || '';
+        const state = addr.state || addr.region || '';
+        const country = addr.country || '';
+        const postalCode = addr.postcode || '';
+
+        return {
+          name: item.name || item.display_name?.split(',')[0] || cleanQ,
+          address: item.display_name,
+          latitude: parseFloat(item.lat),
+          longitude: parseFloat(item.lon),
+          city: city || state,
+          state: state || country,
+          country,
+          postalCode,
+        };
+      });
+    }
+  } catch (err) {
+    console.warn('Search geocode error:', err);
+  }
+
+  return [];
 }
 
 export const PRESET_LOCATIONS: { name: string; lat: number; lon: number; alt: number; address: string; city: string; state: string; country: string }[] = [

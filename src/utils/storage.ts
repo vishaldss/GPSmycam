@@ -10,7 +10,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoSaveToDevice: true,
   autoSyncGoogleDrive: true,
   driveRootFolder: 'GPS Camera Photos',
-  imageQuality: 0.95,
+  imageQuality: 0.98,
+  photoResolution: 'max_sensor',
+  useGoogleMaps: true,
+  googleMapsApiKey: '',
+  enableSensorDirectCapture: true,
   filenamePrefix: 'GPS_IMG',
 };
 
