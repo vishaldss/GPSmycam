@@ -12,33 +12,40 @@ import {
   Navigation,
   Sliders,
 } from 'lucide-react';
-import { GPSLocationData, WatermarkConfig, CapturedPhoto } from '../types';
+import { GPSLocationData, WatermarkConfig, CapturedPhoto, AppSettings } from '../types';
 import { GPSOverlayHUD } from './GPSOverlayHUD';
 import { applyWatermarkToImage } from '../utils/watermarkEngine';
-import { generatePhotoFilename, savePhotoToMediaStore } from '../utils/storage';
+import { generatePhotoFilename, savePhotoToMediaStore, downloadPhotoFile } from '../utils/storage';
+import { User } from 'firebase/auth';
 
 interface CameraViewfinderProps {
   location: GPSLocationData | null;
   watermarkConfig: WatermarkConfig;
+  appSettings: AppSettings;
+  currentUser: User | null;
   savedPhotosCount: number;
   onPhotoCaptured: (photo: CapturedPhoto) => void;
   onOpenGallery: () => void;
   onOpenSettings: () => void;
   onOpenLocationPresets: () => void;
   onOpenCodeViewer: () => void;
-  onShowToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  onUploadToDrive?: (photo: CapturedPhoto, blob: Blob) => Promise<{ fileId: string; viewUrl: string }>;
+  onShowToast: (msg: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
   onUpdateCustomNote?: (text: string) => void;
 }
 
 export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
   location,
   watermarkConfig,
+  appSettings,
+  currentUser,
   savedPhotosCount,
   onPhotoCaptured,
   onOpenGallery,
   onOpenSettings,
   onOpenLocationPresets,
   onOpenCodeViewer,
+  onUploadToDrive,
   onShowToast,
   onUpdateCustomNote,
 }) => {
@@ -234,7 +241,7 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
       };
 
       const captureTimestamp = Date.now();
-      const filename = generatePhotoFilename(captureTimestamp);
+      const filename = generatePhotoFilename(appSettings.filenamePrefix || 'GPS_IMG', captureTimestamp);
 
       // Execute Canvas Watermark Processing
       const result = await applyWatermarkToImage(
@@ -243,6 +250,8 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
         watermarkConfig,
         captureTimestamp
       );
+
+      const targetFolder = appSettings.mobileCameraFolder || 'DCIM/Camera';
 
       const capturedPhoto: CapturedPhoto = {
         id: `photo_${captureTimestamp}`,
@@ -254,13 +263,26 @@ export const CameraViewfinder: React.FC<CameraViewfinderProps> = ({
         height: result.height,
         location: activeLocation,
         watermarkConfig: { ...watermarkConfig },
+        localSavedPath: `${targetFolder}/${filename}`,
       };
 
-      // Save to MediaStore (Pictures/GPSCamera)
-      const savedPath = await savePhotoToMediaStore(capturedPhoto);
+      // Save to local cache & indexed MediaStore folder
+      const savedPath = await savePhotoToMediaStore(capturedPhoto, targetFolder);
+
+      // Auto-save to device file system if enabled
+      if (appSettings.autoSaveToDevice) {
+        downloadPhotoFile(capturedPhoto);
+      }
 
       onPhotoCaptured(capturedPhoto);
       onShowToast(`Saved to ${savedPath}`, 'success');
+
+      // Auto-Sync to Google Drive daily date folder if enabled
+      if (appSettings.autoSyncGoogleDrive && onUploadToDrive) {
+        onUploadToDrive(capturedPhoto, result.blob).catch((err) => {
+          console.warn('Background Drive Sync notice:', err);
+        });
+      }
     } catch (err: any) {
       console.error('Capture error:', err);
       onShowToast(`Capture failed: ${err.message}`, 'error');

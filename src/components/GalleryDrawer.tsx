@@ -1,6 +1,21 @@
 import React, { useState } from 'react';
-import { X, Download, Trash2, MapPin, Calendar, ExternalLink, Image as ImageIcon, Copy, Check, ZoomIn } from 'lucide-react';
-import { CapturedPhoto } from '../types';
+import {
+  X,
+  Download,
+  Trash2,
+  MapPin,
+  Calendar,
+  ExternalLink,
+  Image as ImageIcon,
+  Copy,
+  Check,
+  ZoomIn,
+  Cloud,
+  CloudCheck,
+  RefreshCw,
+  Folder,
+} from 'lucide-react';
+import { AppSettings, CapturedPhoto } from '../types';
 import { downloadPhotoFile, deleteSavedPhoto } from '../utils/storage';
 import { formatCoordinates, formatDate } from '../utils/watermarkEngine';
 
@@ -8,19 +23,24 @@ interface GalleryDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   photos: CapturedPhoto[];
+  appSettings: AppSettings;
   onPhotosUpdated: () => void;
-  onShowToast: (msg: string, type?: 'success' | 'info') => void;
+  onSyncPhotoToDrive?: (photo: CapturedPhoto) => Promise<void>;
+  onShowToast: (msg: string, type?: 'success' | 'info' | 'error' | 'warning') => void;
 }
 
 export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
   isOpen,
   onClose,
   photos,
+  appSettings,
   onPhotosUpdated,
+  onSyncPhotoToDrive,
   onShowToast,
 }) => {
   const [selectedPhoto, setSelectedPhoto] = useState<CapturedPhoto | null>(null);
   const [copied, setCopied] = useState(false);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -31,7 +51,7 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
       if (selectedPhoto?.id === photo.id) {
         setSelectedPhoto(null);
       }
-      onShowToast('Photo deleted from MediaStore', 'info');
+      onShowToast('Photo deleted from local storage', 'info');
     }
   };
 
@@ -42,7 +62,8 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
       `Coordinates: ${formatCoordinates(photo.location.latitude, photo.location.longitude, 'decimal')}`,
       photo.location.address ? `Address: ${photo.location.address}` : '',
       photo.location.altitude ? `Altitude: ${Math.round(photo.location.altitude)}m` : '',
-      `Storage: Pictures/GPSCamera/${photo.filename}`,
+      `Mobile Storage: ${appSettings.mobileCameraFolder}/${photo.filename}`,
+      photo.driveViewUrl ? `Google Drive: ${photo.driveViewUrl}` : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -53,26 +74,46 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
     onShowToast('GPS metadata copied to clipboard', 'success');
   };
 
+  const handleManualDriveSync = async (photo: CapturedPhoto) => {
+    if (!onSyncPhotoToDrive) return;
+    try {
+      setSyncingId(photo.id);
+      await onSyncPhotoToDrive(photo);
+      onPhotosUpdated();
+      // update selected photo state with new drive metadata
+      setSelectedPhoto((prev) => (prev && prev.id === photo.id ? { ...prev, isDriveSyncing: false } : prev));
+    } catch (err: any) {
+      onShowToast(`Drive sync failed: ${err.message}`, 'error');
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
+  const currentFolder = appSettings.mobileCameraFolder || 'DCIM/Camera';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md">
       <div
         id="mediastore-gallery-view"
-        className="w-full max-w-4xl h-[92vh] bg-zinc-900 border border-zinc-800 rounded-3xl flex flex-col overflow-hidden text-zinc-100 shadow-2xl"
+        className="w-full max-w-4xl h-[92vh] bg-zinc-950 border border-zinc-800 rounded-3xl flex flex-col overflow-hidden text-zinc-100 shadow-2xl"
       >
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-zinc-800 flex items-center justify-between shrink-0">
+        <div className="p-4 sm:p-5 border-b border-zinc-800 bg-zinc-900/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-indigo-500/15 text-indigo-400">
+            <div className="p-2.5 rounded-2xl bg-blue-500/15 text-blue-400 border border-blue-500/30">
               <ImageIcon className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold text-white">Device MediaStore Gallery</h2>
-                <span className="px-2 py-0.5 rounded-full bg-zinc-800 text-[11px] font-mono text-zinc-300">
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">Camera & GPS Gallery</h2>
+                <span className="px-2 py-0.5 rounded-full bg-zinc-800 text-[11px] font-mono text-zinc-300 border border-zinc-700">
                   {photos.length} photos
                 </span>
               </div>
-              <p className="text-xs text-zinc-400 font-mono">Pictures/GPSCamera/</p>
+              <div className="text-xs text-zinc-400 font-mono flex items-center gap-1.5 mt-0.5">
+                <Folder className="w-3.5 h-3.5 text-blue-400" />
+                <span>{currentFolder}/</span>
+              </div>
             </div>
           </div>
           <button
@@ -87,7 +128,7 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
         <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
           {photos.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-zinc-500">
-              <div className="w-16 h-16 rounded-full bg-zinc-800/80 flex items-center justify-center mb-4">
+              <div className="w-16 h-16 rounded-3xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-4">
                 <ImageIcon className="w-8 h-8 text-zinc-400" />
               </div>
               <h3 className="text-base font-semibold text-zinc-300 mb-1">No GPS Photos Captured Yet</h3>
@@ -100,19 +141,20 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
               {/* Photo Thumbnails Grid */}
               <div
                 className={`overflow-y-auto p-4 ${
-                  selectedPhoto ? 'hidden md:block md:w-5/12 border-r border-zinc-800' : 'w-full'
+                  selectedPhoto ? 'hidden md:block md:w-5/12 border-r border-zinc-800/80' : 'w-full'
                 }`}
               >
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-2 gap-3">
                   {photos.map((photo) => {
                     const isSelected = selectedPhoto?.id === photo.id;
+                    const hasDrive = !!photo.driveViewUrl;
                     return (
                       <div
                         key={photo.id}
                         onClick={() => setSelectedPhoto(photo)}
-                        className={`group relative rounded-2xl overflow-hidden aspect-[4/3] bg-zinc-950 border-2 cursor-pointer transition-all ${
+                        className={`group relative rounded-2xl overflow-hidden aspect-[4/3] bg-zinc-900 border-2 cursor-pointer transition-all ${
                           isSelected
-                            ? 'border-indigo-500 ring-2 ring-indigo-500/30'
+                            ? 'border-blue-500 ring-2 ring-blue-500/30'
                             : 'border-zinc-800 hover:border-zinc-700'
                         }`}
                       >
@@ -121,7 +163,21 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
                           alt={photo.filename}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80 group-hover:opacity-100 transition-opacity" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent opacity-90 group-hover:opacity-100 transition-opacity" />
+                        
+                        {/* Drive Status Badge */}
+                        <div className="absolute top-2 right-2">
+                          {hasDrive ? (
+                            <span className="p-1 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-emerald-400 block shadow-sm" title="Synced to Google Drive">
+                              <Cloud className="w-3.5 h-3.5" />
+                            </span>
+                          ) : (
+                            <span className="p-1 rounded-lg bg-black/60 border border-white/10 text-zinc-400 block" title="Local Only">
+                              <Folder className="w-3.5 h-3.5" />
+                            </span>
+                          )}
+                        </div>
+
                         <div className="absolute bottom-2 left-2 right-2 text-[10px] text-white/90">
                           <div className="font-mono font-medium truncate">
                             {formatCoordinates(photo.location.latitude, photo.location.longitude, 'decimal')}
@@ -140,15 +196,15 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
               {selectedPhoto ? (
                 <div className="flex-1 flex flex-col bg-zinc-950 overflow-y-auto">
                   {/* Photo Preview Canvas */}
-                  <div className="relative flex-1 min-h-[300px] flex items-center justify-center p-4 bg-black/40">
+                  <div className="relative flex-1 min-h-[280px] flex items-center justify-center p-4 bg-black/50">
                     <img
                       src={selectedPhoto.dataUrl}
                       alt={selectedPhoto.filename}
-                      className="max-h-[50vh] md:max-h-[60vh] max-w-full object-contain rounded-xl shadow-2xl"
+                      className="max-h-[48vh] md:max-h-[55vh] max-w-full object-contain rounded-2xl shadow-2xl border border-white/10"
                     />
                     <button
                       onClick={() => setSelectedPhoto(null)}
-                      className="md:hidden absolute top-4 left-4 px-3 py-1.5 rounded-xl bg-black/70 text-white text-xs font-semibold"
+                      className="md:hidden absolute top-4 left-4 px-3 py-1.5 rounded-xl bg-black/80 text-white text-xs font-semibold border border-white/10"
                     >
                       ← Back to Grid
                     </button>
@@ -159,11 +215,36 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h4 className="text-sm font-bold text-white font-mono">{selectedPhoto.filename}</h4>
-                        <p className="text-xs text-emerald-400 font-mono">
-                          Saved in Scoped Storage: Pictures/GPSCamera/
+                        <p className="text-xs text-blue-400 font-mono flex items-center gap-1.5 mt-0.5">
+                          <Folder className="w-3.5 h-3.5" />
+                          <span>{selectedPhoto.localSavedPath || `${currentFolder}/${selectedPhoto.filename}`}</span>
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Drive Status & Sync Button */}
+                        {selectedPhoto.driveViewUrl ? (
+                          <a
+                            href={selectedPhoto.driveViewUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                          >
+                            <Cloud className="w-4 h-4 text-emerald-400" />
+                            <span>Open in Drive</span>
+                            <ExternalLink className="w-3 h-3 ml-0.5 text-emerald-400" />
+                          </a>
+                        ) : (
+                          <button
+                            onClick={() => handleManualDriveSync(selectedPhoto)}
+                            disabled={syncingId === selectedPhoto.id}
+                            className="px-3 py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${syncingId === selectedPhoto.id ? 'animate-spin' : ''}`} />
+                            <span>{syncingId === selectedPhoto.id ? 'Uploading...' : 'Sync to Google Drive'}</span>
+                          </button>
+                        )}
+
                         <button
                           onClick={() => handleCopyMetadata(selectedPhoto)}
                           className="p-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-300 hover:text-white transition-all text-xs flex items-center gap-1.5"
@@ -175,10 +256,10 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
 
                         <button
                           onClick={() => downloadPhotoFile(selectedPhoto)}
-                          className="px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white transition-all text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/30"
+                          className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white transition-all text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-blue-600/30"
                         >
                           <Download className="w-4 h-4" />
-                          <span>Download Image</span>
+                          <span>Save to Device</span>
                         </button>
 
                         <button
@@ -215,7 +296,7 @@ export const GalleryDrawer: React.FC<GalleryDrawerProps> = ({
                           {formatDate(selectedPhoto.timestamp, 'YYYY-MM-DD HH:mm:ss')}
                         </div>
                         <div className="text-zinc-400 text-[10px] mt-0.5">
-                          {selectedPhoto.width} × {selectedPhoto.height} px
+                          {selectedPhoto.width} × {selectedPhoto.height} px • {(selectedPhoto.fileSize / 1024 / 1024).toFixed(2)} MB
                         </div>
                       </div>
 

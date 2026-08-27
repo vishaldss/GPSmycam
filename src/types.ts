@@ -14,9 +14,11 @@ export interface GPSLocationData {
   isMock?: boolean;
 }
 
-export type WatermarkPosition = 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right' | 'bottom-bar';
-export type CoordinateFormat = 'decimal' | 'dms';
+export type WatermarkPosition = 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right' | 'bottom-bar' | 'top-bar';
+export type CoordinateFormat = 'decimal' | 'dms' | 'utm';
 export type DateFormatOption = 'YYYY-MM-DD HH:mm:ss' | 'DD/MM/YYYY hh:mm:ss A' | 'MMM DD, YYYY HH:mm' | 'UTC';
+export type WatermarkFontFamily = 'JetBrains Mono' | 'Plus Jakarta Sans' | 'Inter' | 'Roboto Mono' | 'Space Mono' | 'Courier New';
+export type WatermarkFontWeight = '400' | '500' | '600' | '700';
 
 export interface WatermarkConfig {
   position: WatermarkPosition;
@@ -28,14 +30,31 @@ export interface WatermarkConfig {
   showAltitude: boolean;
   showHeading: boolean;
   showAccuracy: boolean;
+  showSpeed: boolean;
   showAppBranding: boolean;
   brandingText: string;
   boxOpacity: number; // 0.0 to 1.0
   boxCornerRadius: number; // in relative px
-  fontSizeScale: number; // 0.8 to 1.5
+  fontSizeScale: number; // 0.7 to 1.6
+  fontFamily: WatermarkFontFamily;
+  fontWeight: WatermarkFontWeight;
   textColor: string;
+  accentColor: string;
   boxColor: string;
+  textShadow: boolean;
   customNote: string;
+}
+
+export type AppTheme = 'dark' | 'oled' | 'light' | 'emerald' | 'amber' | 'cyan';
+
+export interface AppSettings {
+  appTheme: AppTheme;
+  mobileCameraFolder: 'DCIM/Camera' | 'Pictures/GPSCamera' | 'DCIM/GPS_Survey' | 'Download/GPS_Photos' | string;
+  autoSaveToDevice: boolean;
+  autoSyncGoogleDrive: boolean;
+  driveRootFolder: string;
+  imageQuality: number; // 0.8 to 1.0
+  filenamePrefix: string;
 }
 
 export interface CapturedPhoto {
@@ -48,6 +67,11 @@ export interface CapturedPhoto {
   height: number;
   location: GPSLocationData;
   watermarkConfig: WatermarkConfig;
+  localSavedPath?: string;
+  driveFileId?: string;
+  driveViewUrl?: string;
+  driveSyncedAt?: number;
+  isDriveSyncing?: boolean;
 }
 
 export interface CameraState {

@@ -1,34 +1,29 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { CameraState, CapturedPhoto, GPSLocationData, ToastMessage, WatermarkConfig } from './types';
+import { AppSettings, CapturedPhoto, GPSLocationData, ToastMessage, WatermarkConfig } from './types';
 import { CameraViewfinder } from './components/CameraViewfinder';
 import { PermissionHandler } from './components/PermissionHandler';
 import { GalleryDrawer } from './components/GalleryDrawer';
-import { WatermarkSettingsModal } from './components/WatermarkSettingsModal';
+import { BackendSettingsPage } from './components/BackendSettingsPage';
 import { LocationPresetModal } from './components/LocationPresetModal';
 import { AndroidCodeModal } from './components/AndroidCodeModal';
 import { AndroidToast } from './components/AndroidToast';
-import { getSavedPhotos } from './utils/storage';
+import {
+  getSavedPhotos,
+  getAppSettings,
+  saveAppSettings,
+  getWatermarkConfig,
+  saveWatermarkConfig,
+  updatePhotoDriveStatus,
+} from './utils/storage';
 import { reverseGeocode, PRESET_LOCATIONS } from './utils/geoUtils';
-
-const DEFAULT_WATERMARK_CONFIG: WatermarkConfig = {
-  position: 'bottom-left',
-  showCoordinates: true,
-  coordinateFormat: 'decimal',
-  showTimestamp: true,
-  dateFormat: 'YYYY-MM-DD HH:mm:ss',
-  showAddress: true,
-  showAltitude: true,
-  showHeading: true,
-  showAccuracy: false,
-  showAppBranding: false,
-  brandingText: 'GPS Camera Pro',
-  boxOpacity: 0.68,
-  boxCornerRadius: 12,
-  fontSizeScale: 1.0,
-  textColor: '#FFFFFF',
-  boxColor: '#000000',
-  customNote: '',
-};
+import { User } from 'firebase/auth';
+import {
+  initAuth,
+  getAccessToken,
+  getDailyDriveFolder,
+  uploadPhotoToDrive,
+  googleSignIn,
+} from './utils/googleDrive';
 
 export default function App() {
   const [cameraPermission, setCameraPermission] = useState<'prompt' | 'granted' | 'denied'>('prompt');
@@ -36,15 +31,35 @@ export default function App() {
   const [permissionsBypassed, setPermissionsBypassed] = useState<boolean>(false);
 
   const [currentLocation, setCurrentLocation] = useState<GPSLocationData | null>(null);
-  const [watermarkConfig, setWatermarkConfig] = useState<WatermarkConfig>(DEFAULT_WATERMARK_CONFIG);
+  const [watermarkConfig, setWatermarkConfig] = useState<WatermarkConfig>(getWatermarkConfig());
+  const [appSettings, setAppSettings] = useState<AppSettings>(getAppSettings());
   const [savedPhotos, setSavedPhotos] = useState<CapturedPhoto[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Auth state
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [cachedToken, setCachedToken] = useState<string | null>(null);
 
   // Modals state
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLocationPresetsOpen, setIsLocationPresetsOpen] = useState(false);
   const [isCodeViewerOpen, setIsCodeViewerOpen] = useState(false);
+
+  // Initialize Firebase Auth listener
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setCurrentUser(user);
+        if (token) setCachedToken(token);
+      },
+      () => {
+        setCurrentUser(null);
+        setCachedToken(null);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
 
   // Load saved photos on mount
   useEffect(() => {
@@ -162,7 +177,6 @@ export default function App() {
   // Trigger permission prompt flow
   const handleRequestPermissions = async () => {
     try {
-      // 1. Camera request
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       stream.getTracks().forEach((t) => t.stop());
       setCameraPermission('granted');
@@ -171,10 +185,9 @@ export default function App() {
       setCameraPermission('denied');
     }
 
-    // 2. Geolocation request
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        async (pos) => {
+        async () => {
           setLocationPermission('granted');
           startLiveLocationTracking();
         },
@@ -215,8 +228,105 @@ export default function App() {
     setSavedPhotos(getSavedPhotos());
   };
 
+  const handleSaveAppSettings = (newSettings: AppSettings) => {
+    setAppSettings(newSettings);
+    saveAppSettings(newSettings);
+  };
+
+  const handleSaveWatermarkConfig = (newConfig: WatermarkConfig) => {
+    setWatermarkConfig(newConfig);
+    saveWatermarkConfig(newConfig);
+  };
+
+  /**
+   * Upload Photo to Google Drive in dynamic daily folder (Root / YYYY-MM-DD)
+   */
+  const handleUploadPhotoToDrive = async (
+    photo: CapturedPhoto,
+    blob?: Blob
+  ): Promise<{ fileId: string; viewUrl: string }> => {
+    let token = cachedToken;
+
+    // If no cached token, try getting or prompting
+    if (!token) {
+      token = await getAccessToken();
+    }
+
+    if (!token) {
+      const signInRes = await googleSignIn();
+      if (!signInRes?.accessToken) {
+        throw new Error('Google Drive authorization required.');
+      }
+      token = signInRes.accessToken;
+      setCachedToken(token);
+      setCurrentUser(signInRes.user);
+    }
+
+    // Convert dataUrl to blob if blob not passed
+    let photoBlob = blob;
+    if (!photoBlob) {
+      const res = await fetch(photo.dataUrl);
+      photoBlob = await res.blob();
+    }
+
+    // Determine today's date string: YYYY-MM-DD
+    const photoDate = new Date(photo.timestamp);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const dateStr = `${photoDate.getFullYear()}-${pad(photoDate.getMonth() + 1)}-${pad(photoDate.getDate())}`;
+
+    // Get or Create Daily Folder
+    const rootFolder = appSettings.driveRootFolder || 'GPS Camera Photos';
+    const folderRes = await getDailyDriveFolder(rootFolder, dateStr, token);
+
+    // Upload Photo File to this daily folder
+    const uploadRes = await uploadPhotoToDrive(
+      photoBlob,
+      photo.filename,
+      folderRes.dailyFolderId,
+      token,
+      `GPS Coordinates: ${photo.location.latitude}, ${photo.location.longitude} | Address: ${photo.location.address || 'N/A'}`
+    );
+
+    // Update in local storage and memory
+    updatePhotoDriveStatus(photo.id, uploadRes.fileId, uploadRes.viewUrl);
+    setSavedPhotos((prev) =>
+      prev.map((p) =>
+        p.id === photo.id
+          ? {
+              ...p,
+              driveFileId: uploadRes.fileId,
+              driveViewUrl: uploadRes.viewUrl,
+              driveSyncedAt: Date.now(),
+            }
+          : p
+      )
+    );
+
+    showToast(`☁️ Uploaded to Google Drive / ${dateStr} / ${photo.filename}`, 'success');
+    return uploadRes;
+  };
+
+  // Theme Wrapper Classes
+  const getThemeWrapperClass = () => {
+    switch (appSettings.appTheme) {
+      case 'oled':
+        return 'bg-black text-white';
+      case 'light':
+        return 'bg-zinc-100 text-zinc-900';
+      case 'emerald':
+        return 'bg-emerald-950 text-emerald-100';
+      case 'amber':
+        return 'bg-amber-950 text-amber-100';
+      case 'cyan':
+        return 'bg-cyan-950 text-cyan-100';
+      case 'dark':
+      default:
+        return 'bg-zinc-950 text-zinc-100';
+    }
+  };
+
   return (
-    <div className="w-screen h-screen bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden select-none">
+    <div className={`w-screen h-screen ${getThemeWrapperClass()} flex flex-col overflow-hidden select-none`}>
       {/* Toast Manager */}
       <AndroidToast toasts={toasts} onDismiss={dismissToast} />
 
@@ -231,16 +341,21 @@ export default function App() {
         <CameraViewfinder
           location={currentLocation}
           watermarkConfig={watermarkConfig}
+          appSettings={appSettings}
+          currentUser={currentUser}
           savedPhotosCount={savedPhotos.length}
           onPhotoCaptured={handlePhotoCaptured}
           onOpenGallery={() => setIsGalleryOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenLocationPresets={() => setIsLocationPresetsOpen(true)}
           onOpenCodeViewer={() => setIsCodeViewerOpen(true)}
+          onUploadToDrive={handleUploadPhotoToDrive}
           onShowToast={showToast}
           onUpdateCustomNote={(note) => {
-            setWatermarkConfig((prev) => ({ ...prev, customNote: note }));
-            showToast(note ? `Custom details updated: "${note}"` : 'Custom details cleared', 'success');
+            const updated = { ...watermarkConfig, customNote: note };
+            setWatermarkConfig(updated);
+            saveWatermarkConfig(updated);
+            showToast(note ? `Custom details saved: "${note}"` : 'Custom details cleared', 'success');
           }}
         />
       )}
@@ -250,16 +365,22 @@ export default function App() {
         isOpen={isGalleryOpen}
         onClose={() => setIsGalleryOpen(false)}
         photos={savedPhotos}
+        appSettings={appSettings}
         onPhotosUpdated={handlePhotosUpdated}
+        onSyncPhotoToDrive={handleUploadPhotoToDrive}
         onShowToast={showToast}
       />
 
-      {/* Watermark Configurator Modal */}
-      <WatermarkSettingsModal
+      {/* Full Backend & App Settings Page */}
+      <BackendSettingsPage
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        config={watermarkConfig}
-        onChange={(updated) => setWatermarkConfig(updated)}
+        appSettings={appSettings}
+        watermarkConfig={watermarkConfig}
+        onSaveAppSettings={handleSaveAppSettings}
+        onSaveWatermarkConfig={handleSaveWatermarkConfig}
+        currentUser={currentUser}
+        onShowToast={showToast}
       />
 
       {/* GPS Location Source / Preset Modal */}

@@ -31,6 +31,20 @@ export function formatDate(timestamp: number, format: string): string {
   return `${YYYY}-${MM}-${DD} ${HH}:${mm}:${ss}`;
 }
 
+export function hexToRgba(hex: string, opacity: number): string {
+  let c = hex.replace('#', '');
+  if (c.length === 3) {
+    c = c.split('').map((char) => char + char).join('');
+  }
+  if (c.length !== 6) {
+    return `rgba(0, 0, 0, ${opacity})`;
+  }
+  const r = parseInt(c.substring(0, 2), 16);
+  const g = parseInt(c.substring(2, 4), 16);
+  const b = parseInt(c.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
 /**
  * Renders the watermark directly onto the canvas using bitmap manipulation
  * matching the Android Canvas / Paint implementation.
@@ -72,7 +86,7 @@ export async function applyWatermarkToImage(
   // Calculate dynamic scaling relative to photo resolution
   // Base reference is 1080p (min dimension ~1080px)
   const minDim = Math.min(srcWidth, srcHeight);
-  const scale = (minDim / 1000) * config.fontSizeScale;
+  const scale = (minDim / 1000) * (config.fontSizeScale || 1.0);
 
   const baseFontSize = Math.max(14, Math.round(20 * scale));
   const subFontSize = Math.max(11, Math.round(15 * scale));
@@ -80,12 +94,16 @@ export async function applyWatermarkToImage(
   const paddingX = Math.round(24 * scale);
   const paddingY = Math.round(18 * scale);
   const lineSpacing = Math.round(8 * scale);
-  const cornerRadius = Math.round(12 * scale);
+  const cornerRadius = Math.round((config.boxCornerRadius || 12) * scale);
   const margin = Math.round(28 * scale);
 
   const timestamp = customTimestamp || location.timestamp || Date.now();
   const dateStr = formatDate(timestamp, config.dateFormat);
   const coordStr = formatCoordinates(location.latitude, location.longitude, config.coordinateFormat);
+
+  // Selected Font Family & Weight
+  const fontFamily = config.fontFamily || 'JetBrains Mono';
+  const fontWeight = config.fontWeight || '600';
 
   // Prepare text lines
   interface TextLine {
@@ -93,6 +111,7 @@ export async function applyWatermarkToImage(
     isPrimary?: boolean;
     isSub?: boolean;
     prefixIcon?: 'location' | 'calendar' | 'compass' | 'altitude' | 'tag';
+    customColor?: string;
   }
 
   const lines: TextLine[] = [];
@@ -121,7 +140,7 @@ export async function applyWatermarkToImage(
     });
   }
 
-  // Extra details line (Altitude, Heading, Accuracy)
+  // Extra details line (Altitude, Heading, Accuracy, Speed)
   const extras: string[] = [];
   if (config.showAltitude && location.altitude !== null) {
     extras.push(`Alt: ${Math.round(location.altitude)}m`);
@@ -131,6 +150,10 @@ export async function applyWatermarkToImage(
   }
   if (config.showAccuracy && location.accuracy !== null) {
     extras.push(`±${Math.round(location.accuracy)}m`);
+  }
+  if (config.showSpeed && location.speed !== null) {
+    const kmh = (location.speed * 3.6).toFixed(1);
+    extras.push(`Speed: ${kmh} km/h`);
   }
 
   if (extras.length > 0) {
@@ -146,6 +169,7 @@ export async function applyWatermarkToImage(
       text: `User / Tag: ${config.customNote.trim()}`,
       isSub: false,
       prefixIcon: 'tag',
+      customColor: config.accentColor || '#60A5FA',
     });
   }
 
@@ -163,7 +187,7 @@ export async function applyWatermarkToImage(
 
   lines.forEach((line, i) => {
     const fontSize = line.isPrimary ? baseFontSize : (line.isSub ? subFontSize : baseFontSize * 0.9);
-    ctx.font = `${line.isPrimary ? '600' : '400'} ${fontSize}px 'JetBrains Mono', 'Plus Jakarta Sans', sans-serif`;
+    ctx.font = `${line.isPrimary ? fontWeight : '400'} ${fontSize}px '${fontFamily}', sans-serif`;
     const metrics = ctx.measureText(line.text);
     const iconOffset = line.prefixIcon ? iconSize + 8 * scale : 0;
     const lineWidth = metrics.width + iconOffset;
@@ -173,8 +197,8 @@ export async function applyWatermarkToImage(
     totalTextHeight += fontSize + (i > 0 ? lineSpacing : 0);
   });
 
-  // Clamp max box width to 85% of image width for clean aesthetics
-  const maxBoxAllowedWidth = srcWidth * 0.85;
+  // Clamp max box width to 88% of image width
+  const maxBoxAllowedWidth = srcWidth * 0.88;
   const boxWidth = Math.min(maxBoxAllowedWidth, maxLineWidth + paddingX * 2);
   const boxHeight = totalTextHeight + paddingY * 2;
 
@@ -194,21 +218,25 @@ export async function applyWatermarkToImage(
   } else if (config.position === 'bottom-bar') {
     boxX = 0;
     boxY = srcHeight - boxHeight;
+  } else if (config.position === 'top-bar') {
+    boxX = 0;
+    boxY = 0;
   }
 
   // Draw semi-transparent background box
   ctx.save();
-  ctx.fillStyle = `rgba(0, 0, 0, ${config.boxOpacity})`;
+  const boxRgba = hexToRgba(config.boxColor || '#000000', config.boxOpacity !== undefined ? config.boxOpacity : 0.68);
+  ctx.fillStyle = boxRgba;
 
-  if (config.position === 'bottom-bar') {
+  if (config.position === 'bottom-bar' || config.position === 'top-bar') {
     ctx.fillRect(0, boxY, srcWidth, boxHeight);
   } else {
     // Draw rounded rectangle
     drawRoundedRect(ctx, boxX, boxY, boxWidth, boxHeight, cornerRadius);
     ctx.fill();
 
-    // Subtle 1px border for high contrast
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    // Subtle border for high contrast
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
     ctx.lineWidth = Math.max(1, Math.round(1.5 * scale));
     ctx.stroke();
   }
@@ -222,19 +250,24 @@ export async function applyWatermarkToImage(
     const isPrimary = line.isPrimary;
     const isSub = line.isSub;
 
-    ctx.font = `${isPrimary ? '600' : '400'} ${fontSize}px 'JetBrains Mono', 'Plus Jakarta Sans', sans-serif`;
+    ctx.font = `${isPrimary ? fontWeight : '400'} ${fontSize}px '${fontFamily}', sans-serif`;
     ctx.textBaseline = 'top';
 
     const textX = boxX + paddingX;
 
     // Draw clean text with high legibility
-    ctx.fillStyle = isPrimary ? '#FFFFFF' : (isSub ? '#A1A1AA' : '#F4F4F5');
+    const primaryColor = config.textColor || '#FFFFFF';
+    ctx.fillStyle = line.customColor || (isPrimary ? primaryColor : (isSub ? '#A1A1AA' : '#F4F4F5'));
     
-    // Draw text with subtle shadow for crisp contrast against any background
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-    ctx.shadowBlur = Math.round(3 * scale);
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = Math.round(1 * scale);
+    // Text shadow for crisp contrast
+    if (config.textShadow !== false) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowBlur = Math.round(3 * scale);
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = Math.round(1 * scale);
+    } else {
+      ctx.shadowColor = 'transparent';
+    }
 
     // Truncate text if exceeds box
     let displayText = line.text;
